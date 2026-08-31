@@ -17,6 +17,11 @@
 
 static const char *TAG = "media";
 
+// PlayoutBuffer (tincan-core) takes its sizing at construction; derive it
+// from this board's config here rather than inside the shared component.
+#define PLAYOUT_TARGET_SAMPLES ((POC_JITTER_TARGET_MS) * (POC_SAMPLE_RATE_HZ) / 1000)
+#define PLAYOUT_MAX_SAMPLES    ((POC_JITTER_MAX_MS) * (POC_SAMPLE_RATE_HZ) / 1000)
+
 #define MEDIA_BIT_SHUTDOWN       BIT0
 #define MEDIA_BIT_TX_EXITED      BIT1
 #define MEDIA_BIT_RX_EXITED      BIT2
@@ -157,15 +162,37 @@ void mediaPlayoutTask(void *param)
 
 }  // namespace
 
-void media_run_full_duplex(SipUac &uac, int rtp_sock, const sockaddr_in &dst)
+void media_run_full_duplex(TincanUac &uac, bool (*localHangup)(void))
 {
-    PlayoutBuffer jbuf;
+    // The media endpoint is published by the UAC once the SDP answer is in.
+    // On a delayed-offer INVITE (drawbridge's inbound ring-all) that is the
+    // ACK, which can trail answer() by a round trip -- so poll briefly for it
+    // rather than failing the call at t=0.
+    uint32_t ipBe = 0;
+    uint16_t portBe = 0;
+    for (int i = 0; i < 100 && uac.inCall() && !uac.mediaTarget(ipBe, portBe); i++) {
+        uac.poll();
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (!uac.inCall()) return;
+    if (!uac.mediaTarget(ipBe, portBe)) {
+        ESP_LOGE(TAG, "no media endpoint after 2 s -- hanging up");
+        uac.hangup();
+        return;
+    }
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_addr.s_addr = ipBe;
+    dst.sin_port = portBe;
+    uac.flushRtpBacklog();   // don't inherit pre-answer backlog as latency
+
+    PlayoutBuffer jbuf(PLAYOUT_MAX_SAMPLES, PLAYOUT_TARGET_SAMPLES);
     EventGroupHandle_t evt = xEventGroupCreate();
     if (evt == NULL) {
         ESP_LOGE(TAG, "xEventGroupCreate failed (out of heap?) — aborting full-duplex media");
         return;
     }
-    MediaCtx ctx{ rtp_sock, dst, &jbuf, evt };
+    MediaCtx ctx{ uac.rtpSocket(), dst, &jbuf, evt };
 
     ESP_LOGI(TAG, "full-duplex media up (jitter target=%dms max=%dms)",
              POC_JITTER_TARGET_MS, POC_JITTER_MAX_MS);
@@ -191,13 +218,20 @@ void media_run_full_duplex(SipUac &uac, int rtp_sock, const sockaddr_in &dst)
         xEventGroupSetBits(ctx.evt, MEDIA_BIT_PLAYOUT_EXITED);
     }
 
-    // Supervisor: same BYE-poll this project has always used, just coarser
-    // now (50 ms — doesn't need 20 ms audio-frame precision), plus a periodic
-    // jitter-buffer stats log for hardware validation.
+    // Supervisor: drive the UAC's signalling (BYE from the peer ends the
+    // call; OPTIONS keepalives get answered so the registrar keeps us) at a
+    // coarse 50 ms cadence, plus a periodic jitter-buffer stats log for
+    // hardware validation.
     TickType_t lastStats = xTaskGetTickCount();
     for (;;) {
-        if (uac.checkHangup()) {
+        uac.poll();
+        if (!uac.inCall()) {
             ESP_LOGI(TAG, "call ended by peer");
+            break;
+        }
+        if (localHangup && localHangup()) {
+            ESP_LOGI(TAG, "local hangup");
+            uac.hangup();
             break;
         }
         if (xTaskGetTickCount() - lastStats >= pdMS_TO_TICKS(5000)) {

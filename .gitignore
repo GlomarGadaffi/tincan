@@ -22,4 +22,5 @@ notes/
 *.txt
 LINEAGE.md
 *.old
-*.bak
+*.bakbuild/
+sdkconfig.old

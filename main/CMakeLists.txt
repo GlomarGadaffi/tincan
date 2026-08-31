@@ -6,15 +6,15 @@ else()
     set(DRIVER_REQUIRES driver)
 endif()
 
+# SIP (TincanUac), the jitter buffer, RTP helpers and G.711 come from the
+# shared tincan-core repo (see the top-level CMakeLists.txt). Only the board
+# audio path, Wi-Fi bring-up and the media task wiring live here.
 idf_component_register(
     SRCS
         "app_main.cpp"
-        "sip_uac.cpp"
         "audio_io.c"
-        "g711.c"
         "net_wifi.c"
         "media_tasks.cpp"
-        "playout_buffer.cpp"
     INCLUDE_DIRS "."
     REQUIRES
         ${DRIVER_REQUIRES}   # i2s_std + i2s_pdm + gpio
@@ -25,5 +25,7 @@ idf_component_register(
         lwip
         esp_timer
         esp_hw_support       # esp_random()
-        sip_core
+        tincan_uac
+        tincan_media
+        tincan_codecs
 )
