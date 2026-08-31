@@ -88,6 +88,7 @@ extern "C" void app_main(void)
         ESP_LOGE(TAG, "UAC init failed (socket bind?)");
         return;
     }
+    uac.setCredentials("", POC_SIP_SECRET);   // only used if the registrar challenges
     // Bounds the RX media task's shutdown-poll interval (it blocks in recvfrom).
     struct timeval rtv = { 0, POC_RTP_RX_TIMEOUT_MS * 1000 };
     setsockopt(uac.rtpSocket(), SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));

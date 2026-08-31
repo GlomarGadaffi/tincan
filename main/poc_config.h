@@ -20,6 +20,10 @@
 #define POC_SIP_EXT_SELF     "500"   // we register as this extension
 #define POC_SIP_EXT_CALLEE   "113"   // we call this extension via the server
 #define POC_SIP_REG_EXPIRES  3600
+// Digest secret for Learn/Secure registrar modes (drawbridge: SECURITY ->
+// Devices). Leave empty for an Open registrar; only ever sent in answer to a
+// 401/407 challenge.
+#define POC_SIP_SECRET       ""
 
 // Local ports.
 #define POC_SIP_LOCAL_PORT   5060
